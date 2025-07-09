@@ -1,6 +1,3 @@
-# Swift 변수명 난독화 예외 가이드
-
-Swift에서 난독화를 적용하면 안 되는 주요 변수 패턴과 그 이유를 사례와 함께 설명합니다.
 
 ---
 
@@ -83,6 +80,7 @@ struct ParentView: View {
 ---
 
 ## 4. `@State`
+-> 난독화 시 DSL 코드도 같이 바꿔야 하지만, DSL 전체가 동적이고, $ 접두사, projectedValue, internal ID 등 여러 메타 구조와 엮여 있음
 
 ```swift
 struct CounterView: View {
@@ -147,6 +145,7 @@ class User: NSObject, NSCoding {
 
 ## 7. `@objc dynamic`
 
+-> 문자열도 같이 바꾸면 되는거 아닌가 ?? 
 → KVO/KVC 등 문자열 기반 런타임 참조에 사용됨
 
 ```swift
@@ -192,4 +191,4 @@ let config = Realm.Configuration(
 Realm.Configuration.defaultConfiguration = config
 ```
 
-⇒ 하지만 Realm 모델은 보통 `@objc dynamic` 이 필수이며, 이 구조 자체가 난독화 제외의 핵심 원인입니다.
+⇒  근데 결국 Realm 모델의 프로퍼티로 사용하기 위해선 @objc dynamic  을 거의 무조건 써야 하고, 이 구조 자체가 난독화 제외의 핵심 원인
