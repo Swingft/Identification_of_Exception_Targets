@@ -137,10 +137,10 @@ extension UIViewController {
 ## 4. Protocol
 프로토콜이 요구하는 정확한 시그니처와 이름을 지켜야 메서드 호출이 가능함  
 → 프로토콜의 required 메서드 이름을 난독화하면 프로토콜 준수가 깨지면서 에러 발생  
-→ 프로토콜 선언부에 있는 메서드들을 모두 추출해서 난독화 제외 대상에 추가
+→ 프로토콜 선언부에 있는 메서드들을 모두 추출해서 난독화 제외 대상에 추가 + struct/class에서 채택된 프로토콜과 구현된 메서드 추출
 
 ### required 메서드
-프로토콜의 required 메서드는 AST의 `ProtocolDeclSyntax` 노드 내부의 `FunctionDeclSyntax` 노드에서 추출할 수 있음
+→ 프로토콜의 required 메서드는 AST의 `ProtocolDeclSyntax` 노드 내부의 `FunctionDeclSyntax` 노드에서 추출할 수 있음  
 ```swift
 // ProtocolDeclSyntax 노드
 protocol Hashable { func hash(into hasher: inout Hasher) }
@@ -148,3 +148,6 @@ protocol Hashable { func hash(into hasher: inout Hasher) }
 // FunctionDeclSyntax 노드
 func hash(into:)
 ```
+→ 구현된 required 메서드는 AST의 `StructDeclSyntax`, `ClassDeclSyntax` 노드의 `InheritedTypeList`에서 추출할 수 있음  
+<img width="575" alt="image" src="https://github.com/user-attachments/assets/99409eab-9aeb-48e1-a4ca-2a45a1dee01f" />
+
