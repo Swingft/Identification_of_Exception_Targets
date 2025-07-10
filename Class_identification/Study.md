@@ -152,6 +152,16 @@ if let clazz = NSClassFromString("GADAppDelegate") as? NSObject.Type {
 
 ---
 
+| 1 | **OS 엔트리 클래스** AppDelegate, SceneDelegate, @main struct MyApp | ‣ *UIKit* : UIApplicationMain 또는 @UIApplicationMain 속성이 **Info.plist** 에 기록된 Principal Class 이름을 그대로 사용해 앱을 부트스트랩. ‣ *SwiftUI* : @main 속성이 붙은 타입을 LLVM이 **맹글링 이름 그대로** main 함수로 변환. | 런타임이 문자열로 클래스를 찾은 뒤 alloc / init. 이름이 달라지면 **앱이 런치되지 않고 즉시 크래시** (UIApplicationMain failed to instantiate delegate class) | · grep -R "UIApplicationMain" .*· SwiftSyntax로 @UIApplicationMain / @main 속성 스캔 |
+| --- | --- | --- | --- | --- |
+| **2** | **시스템·3rd-party 후킹**푸시, 인앱결제, 광고 등 | 예)    • UNNotificationServiceExtension**의 서브클래스**는 **Info.plist**의 NSExtensionPrincipalClass 키에 그대로 기록됨.   • Ad SDK(예: Google Mobile Ads)가 GADAppDelegate 이름을 리플렉션으로 찾음. | iOS / SDK 가 **문자열 → 클래스 인스턴스**로 매핑. 이름이 변하면 서비스(푸시, 광고 로드 등) 자체가 동작 불가. | · 각 타깃 번들의 Info.plist에서 *PrincipalClass 값 추출· CocoaPods / SPM 모듈의 README에서 “Subclass XXX” 문구 grep |
+| **3** | **Interface Builder 연결**Storyboard·XIB의 customClass | .storyboard, .xib, .nib 안에 <customClass="ProfileViewController">가 하드코딩. 런타임에 UINib이 **NSClassFromString(“ProfileViewController”)** 호출. | 이름이 어긋나면 불러올 때 throw: -[UIClassSwapper setClassName:]: class ViewController ... could not be loaded. | · 빌드 스크립트에서 grep -o 'customClass="[^"]*"' *.storyboard· SwiftSyntax로 class .*ViewController 패턴 태그 |
+| **4** | **@objc / dynamic 노출 클래스** | @objc class AnalyticsManager: NSObject {}dynamic class HotPatch: NSObject {} | Obj-C 런타임 심볼 테이블(**SEL · Class_⊕ 이름**)이 그대로 공개되어야 **KVC/KVO, Method Swizzling, NSCoding**이 정상 작동. | · AST에 attributes.contains("objc") or "dynamic"· nm -gU로 바이너리에 _OBJC_CLASS_$_ 접두사 찾기 |
+| **5** | **@IBInspectable / @IBDesignable** | Interface Builder(IB)가 Design-time 렌더링 때 클래스를 로드하여 **속성을 미리보기**. | 이름이 바뀌면 IB 미리보기 실패→ Xcode 경고 & 런타임 nib load 크래시. | · AST attribute "IBDesignable"·"IBInspectable" 스캔 |
+| **6** | **JSBridge / WebKit 메시지 핸들러** | swift<br>userContentController.add(self, name:"logClick")<br>JS → window.webkit.messageHandlers.logClick.postMessage(...) | WebKit이 **name 문자열만**으로 핸들러 객체를 찾음. 클래스 이름이 변하면 매핑 테이블에 없어서 JS와 Native 통신 단절. | · 모든 add(_:name:) 호출의 두 번째 파라미터 값 수집 |
+| **7** | **SDK 전용 필수 클래스** | Facebook SDK: ApplicationDelegate,Firebase Auth UI: FUIAuthDelegate,GameKit: GKGameCenterControllerDelegate | SDK 내부(Obj-C)에서 NSClassFromString("ApplicationDelegate")로 특정 이름을 검사하거나, **Method Swizzling** 대상 판단. | · Pods/**/*.m 에서 NSClassFromString("...") grep· SDK 문서 “Do not rename this class” 절 자동 스크랩 |
+| **8** | **수동 Reflection 등록 클래스** | swift<br>if let cls = NSClassFromString(className) as? Patch.Type { ... }<br>또는 objc_getClass("Patch") | 개발자가 **문자열로 직접 로드**; 이름 바꾸면 패치·플러그인·Hotfix 로직이 전부 무력화. | · 데이터-플로 분석으로 NSClassFromString 인자 소스 추적· 문자열 리터럴 ↔ 심볼 교집합 확대 매칭 |
+
 # 1. OS 엔트리 클래스
 
 ## AppDelegate, SceneDelegate, @main struct MyApp
@@ -168,8 +178,208 @@ if let clazz = NSClassFromString("GADAppDelegate") as? NSObject.Type {
 
 ## 언제 어떻게 동작?
 
-UNNotificationServiceExtension**의 서브클래스**는 **Info.plist**의 NSExtensionPrincipalClass 키에 그대로 기록됨.   • Ad SDK(예: Google Mobile Ads)가 GADAppDelegate 이름을 리플렉션으로 찾음.
+1. UNNotificationServiceExtension**의 서브클래스**는 **Info.plist**의 NSExtensionPrincipalClass 키에 그대로 기록됨.   
+
+```xml
+<key>NSExtension</key>
+<dict>
+  <key>NSExtensionPrincipalClass</key>
+  <string>MyNotificationService</string>
+</dict>
+```
+
+1. Ad SDK(예: Google Mobile Ads)가 GADAppDelegate 이름을 리플렉션으로 찾음.
+
+```swift
+let className = "GADAppDelegate"
+if let clazz = NSClassFromString(className) as? NSObject.Type {
+    let instance = clazz.init()
+    // delegate로 등록하거나, 메서드 호출
+}
+```
 
 UNNotificationServiceExtension은 시스템 프레임워크에 존재하는 클래스로 수정 절대안됨.
 
 ASPresentationAnchorProvider
+
+1. **ASPresentationAnchorProvider**
+- 이는 SwiftUI에서 인증 관련 기능을 구현할 때 사용하는 클래스
+- 마찬가지로, 특정 이름을 가진 클래스나 메서드가 **정해진 인터페이스(프로토콜)**를 충족하도록 구현돼야 하며,
+- 일부는 **시스템이 직접 클래스명을 찾아서 사용**.
+
+# 3. **Interface Builder 연결** Storyboard, XIB의 customClass
+
+## customClass란
+
+**Storyboard나 XIB 내부에서 특정 UI 요소가 연결될 Swift 클래스 이름을 명시하는 속성으로**
+
+xml파일 보고 빼면됨
+
+충돌나는 이유는 2번이랑 유사함
+
+# 4. @objc / dynamic 노출 클래스
+
+- @objc = **이걸 Obj-C에서 쓸 수 있게 해주는 역할**
+- dynamic = **Swift 컴파일러 최적화 말고 Obj-C처럼 동적으로 호출하게 해주는 역할**
+
+동적 디스패치
+
+```swift
+class Animal {
+    func speak() {
+        print("...")
+    }
+}
+
+class Dog: Animal {
+    override func speak() {
+        print("멍멍")
+    }
+}
+
+let a: Animal = Dog()
+a.speak() 
+```
+
+Animal 타입의 Dog 인스턴스 생성
+
+컴파일 타임에서 a.speak()하면 Animal.speak()
+
+런타임에서는 Dog.speak()
+
+“메서드 호출 시점을 **런타임에 결정**해서, 실제 인스턴스의 구현을 찾아 호출하는 메커니즘”
+
+상속과는 조금 다른 개념으로
+
+상속은 동적 디스패치를 사용할 수 있게 해주는 전제조건
+
+### **상속(Inheritance)은 구조(구조 관계)**
+
+- 클래스 간 계층 구조를 정의
+- Dog: Animal처럼 부모 클래스의 기능을 자식 클래스에 전달
+
+### **동적 디스패치(Dynamic Dispatch)는 동작(실행 방식)**
+
+- 런타임에 **실제 객체의 타입**을 보고 어떤 메서드를 호출할지 결정
+- 보통 **오버라이딩된 메서드가 존재**할 때 동적 디스패치가 필요함
+
+복잡하게 왜 저렇게 애매하게 동적 디스패치를 하냐
+
+```swift
+class Animal {
+    func speak() {
+        print("...")
+    }
+}
+
+class Dog: Animal {
+    override func speak() {
+        print("멍멍")
+    }
+}
+
+class Cat: Animal {
+    override func speak() {
+        print("야옹")
+    }
+}
+
+func makeItSpeak(_ animal: Animal) {
+    animal.speak()
+}
+
+let dog = Dog()
+let cat = Cat()
+
+makeItSpeak(dog) // 멍멍
+makeItSpeak(cat) // 야옹
+```
+
+이렇게 작성하면 makeItSpeak는 Animal 타입만 알면된다.
+
+Dog이든, Cat이든 상관 없이 speak() 호출 가능하다.
+
+1. **상속 관계가 유지될 것**
+    - Dog는 여전히 Animal을 상속
+2. **오버라이딩된 메서드명이 일관될 것**
+    - speak() → _x4로 바뀌었다면,
+        
+        Animal, Dog, Cat 모두에서 speak()를 _x4로 동일하게 바꿔야 함
+        
+3. **런타임에 해당 메서드를 직접 문자열로 찾지 않을 것**
+    - 즉, NSSelectorFromString("speak") 같은 **리플렉션 기반 호출이 없을 경우**
+
+이런 조건이면 가능
+
+# **5. @IBInspectable / @IBDesignable**
+
+**@IBInspectable / @IBDesignable 관련 클래스는 내부 파일들(예: XIB, Storyboard, Nib 등)을 정확하게 수정만 해준다면 난독화해도 괜찮긴 할듯**
+
+외부 SDK에서 호출되는 경우가 없어서 상관 없을 것 같음
+
+얘도 customClass에 써지기는 하지만, @태그로 알아볼 수 있기 때문에, 난독화 적용은 가능함. 대신 UI 쪽이라 좀 고민해봐야 할듯
+
+# 6. **JSBridge / WebKit 메시지 핸들러**
+
+는 뒤에 딸린 문자열만 아니면 난독화 해도 될듯
+
+| 등록된 name | userContentController.add(self, name: "logClick") ← 이 "logClick"은 하드코딩된 문자열 |
+| --- | --- |
+| 리플렉션 아님 | 이 경우는 클래스명을 NSClassFromString으로 찾는 게 아니라, **name 문자열 자체로 매핑** |
+| 안전 조치 | Swift 코드에서 add(_:name:)의 두 번째 인자만 정확히 스캔하면 안전하게 제외 처리 가능 |
+
+# 7. **SDK 전용 필수 클래스**
+
+이거는 외부에서 리플렉션으로 참조하는지 plist로 참조하는지 알 방법이 없음(소스코드가 오픈소스가 아닌이상, 그리고 소스코드가 언제 바뀔지도 모르고)
+
+| **SDK** | **우리가 구현해야 하는 클래스 이름** | **설명** |
+| --- | --- | --- |
+| **Facebook SDK** | ApplicationDelegate | Facebook 로그인/앱 초기화 관련 delegate |
+| **Firebase Auth UI** | FUIAuthDelegate | 인증 완료 시 콜백 제공 |
+| **GameKit** | GKGameCenterControllerDelegate | Game Center 관련 이벤트 처리 |
+
+예시로 저런 이름의 클래스를 구현해야 SDK를 사용 가능함
+
+이게 확실한 애들은 넣을 생각 하지 말고, 그냥 제외시킬 방법이나 고려해야 할듯
+
+| **구분** | **방법** | **설명** |
+| --- | --- | --- |
+| **1. SDK 문서 기반 수작업 식별** | "Do not rename" 문구 자동 검색 | Facebook, Firebase, GameKit 등에서 **명시적으로 클래스명을 요구하는 경우가 많음** → README, 공식 문서, GitHub 내 md/html 파일 grep |
+| **2. 바이너리 문자열 분석** | `strings libXYZ.a | grep ‘Delegate’<br>strings libXYZ.framework/libXYZ |
+| **3. .m / .swift 코드 내 검색** | grep NSClassFromString | CocoaPods로 받은 SDK의 .m 소스파일이 있는 경우 (드물지만 있음) 직접 리플렉션 호출 여부 확인 가능 |
+| **4. 런타임 로깅** (고급) | dyld hooking, objc_getClass 후킹 | 실제 런타임 중 어떤 클래스 이름이 동적으로 불리는지를 기록하는 방법. iOS에서는 어렵지만 **macOS 시뮬레이터**에서는 가능 |
+| **5. 클래스가 반드시 존재해야 앱이 동작하는 경우** | 앱을 실행해보고 특정 클래스 이름을 변경한 상태로 크래시 여부 확인 | 가장 원시적이지만 확실한 방법. 크래시 메시지에 Could not instantiate class ...가 뜨면 외부 의존성 존재 |
+
+## 만약 자동으로 제외시킨다면
+
+1. **Podfile.lock / Package.swift**에서 사용 중인 SDK 리스트를 파악
+2. SDK별로 [사전 정리된 위험 클래스 리스트](예: Firebase → FUIAuthDelegate, Facebook → ApplicationDelegate)를 보유
+3. 빌드시 이 리스트에 포함된 클래스명은 무조건 제외 처리
+4. strings-based 추출은 보조 수단으로 사용 (SDK 업데이트 시 바뀔 수 있으므로 신뢰도 낮음)
+
+# 8. 수동 Reflection 등록 클래스
+
+```swift
+let className = "MyHotfixClass" // ← 문자열 직접 지정
+if let cls = NSClassFromString(className) as? Patch.Type {
+    let instance = cls.init()
+    instance.applyPatch()
+}
+```
+
+예시코드로
+
+저런 이름의 클래스가 구현되어 있다고 가정하고 쓰는 부분이긴 한데, 클래스 이름 바꿀 때 변수에 들어가는 문자열과 동시에 잘 바꾸기만 하면 문제는 없는 것으로 보임
+
+---
+
+# 구조체
+
+| **항목** | **설명** | **제외 필요성** |
+| --- | --- | --- |
+| 1. @main struct MyApp | SwiftUI 앱의 진입점(엔트리포인트). 런타임에 클래스/함수 진입점으로 변환됨. | **필수 제외**이름 바뀌면 앱 실행 실패 |
+| 2. ASPresentationAnchorProvider 구현 구조체 | 인증(예: Sign in with Apple) 시 시스템이 이 프로토콜을 만족하는 인스턴스를 요구 | 구현 구조체가 시스템에 의해 요구될 경우, 이름 또는 메서드 유지 필요 |
+| 3. @IBInspectable 속성이 있는 구조체 | IB에서 디자인 타임에 렌더링하기 위해 인식됨 | 대부분 클래스에 적용되지만 구조체도 지원 가능→ 사용 여부 확인 후 제외 여부 결정 |
+| 4. SwiftUI View 구조체 (struct ContentView: View) | 일반적인 SwiftUI 뷰 구조체 | View 이름이 외부에서 참조되지 않으면 안전 단, Preview나 자동 테스트에서 이름 기반 매칭할 경우 주의 필요 |
+| 5. ObservableObject + @Published로 KVO 흉내내는 구조체 | Swift에서는 NSObject 기반 KVO 대신 Combine 사용 | 외부 런타임 접근 없으면 안전 단, @objc와 같이 사용되면 주의 |
+| 6. @objc struct (비정상적 사용) | Swift 구조체에 @objc는 거의 쓰지 않음. 컴파일 오류 가능 | 보통 불필요 / 구조체에는 잘 안 씀 |
