@@ -88,6 +88,19 @@
 - `Mirror(reflecting:)`, `dump()` 등 리플렉션 대상 구조체 내 변수
 내부적으로 디버깅, 로깅, 테스트용으로 `.label`이 출력되는 변수
     
+    → 만약에 사용자가 디버깅 코드 제거를 원하지 않으면 이건 난독화 제외 항목에 들어가긴 해야 함 
+    
+    ```idris
+    struct User {
+        var name: String
+        var age: Int
+    }
+    
+    let user = User(name: "Jin", age: 30)
+    dump(user)
+    -> dump라는 디버깅 도구도 활용을 못하게 할 것인지 ~ 
+    ```
+    
     ```jsx
     struct DebugInfo {
         var filePath: String     // X
@@ -132,7 +145,7 @@
     
 - RawRepresentable
     
-    RawRepresentable을 채택한 어떤 타입이든, rawValue 변수명은 고정이며 난독화 불.
+    RawRepresentable을 채택한 어떤 타입이든, rawValue 변수명은 고정이며 난독화 불
     
     ```idris
     class MyType: RawRepresentable {
@@ -150,8 +163,10 @@
     
     ```idris
     struct User: CustomStringConvertible {
-        var desc: String {  // 이름 바꾸면 컴파일 에러
+        var description: String {  // 이름 바꾸면 컴파일 에러
             "Wrong"
         }
     }
     ```
+    
+    →`CustomStringConvertible` 프로토콜이 요구하는 이름이 사라지기 때문에 난독화 불가 변수
