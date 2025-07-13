@@ -137,17 +137,43 @@ extension UIViewController {
 ## 4. Protocol
 프로토콜이 요구하는 정확한 시그니처와 이름을 지켜야 메서드 호출이 가능함  
 → 프로토콜의 required 메서드 이름을 난독화하면 프로토콜 준수가 깨지면서 에러 발생  
-→ 프로토콜 선언부에 있는 메서드들을 모두 추출해서 난독화 제외 대상에 추가 + struct/class에서 채택된 프로토콜과 구현된 메서드 추출
+→ struct/class에서 채택한 표준 프로토콜과 required 메서드를 추출해 난독화에서 제외
+
+### 표준 프로토콜 vs 사용자 정의 프로토콜
+→ 사용자 정의 프로토콜의 경우 `protocol SomeProtocol {}` 선언이 소스코드에 존재하고, 이는 AST 상에 `ProtocolDeclSyntax` 노드로 나타남  
+→ SwiftSyntax는 사용자가 작성한 파일만 분석하기 때문에, 표준 라이브러리나 SDK 내부 프로토콜은 정의부가 AST에 포함되지 않고, `ProtocolDeclSyntax`로 보이지 않음 (표준 프로토콜과 외부 라이브러리 구분이 안 됨 but 둘 다 제외 대상이기 때문에 구분할 필요 없음)
 
 ### required 메서드
-→ 프로토콜의 required 메서드는 AST의 `ProtocolDeclSyntax` 노드 내부의 `FunctionDeclSyntax` 노드에서 추출할 수 있음  
-```swift
-// ProtocolDeclSyntax 노드
-protocol Hashable { func hash(into hasher: inout Hasher) }
-
-// FunctionDeclSyntax 노드
-func hash(into:)
+→ SourceKit-LSP로 분석해 `key.related_entities`에 `role.implementation`가 있는지 확인
+- required 메서드
+```json
+{
+    "key.related_entities": [
+        {
+            "key.name": "UITableViewDelegate",
+            "key.roles": [
+                "role.implementation",
+                "role.reference"
+            ],
+            "key.kind": "source.lang.swift.ref.protocol",
+            "key.usr": "s:UIKit22UITableViewDelegateP"
+        }
+    ] 
+}
+{
+    "_comment": "role.implementation : 특정 프로토콜의 요구사항 구현부",
+    "_comment": "key.kind : 심볼의 종류로, swift.ref.protocol인 경우 Swift 프로토콜을 참조하는 코드 요소임"
+}
 ```
-→ 구현된 required 메서드는 AST의 `StructDeclSyntax`, `ClassDeclSyntax` 노드의 `InheritedTypeList`에서 추출할 수 있음  
-<img width="575" alt="image" src="https://github.com/user-attachments/assets/99409eab-9aeb-48e1-a4ca-2a45a1dee01f" />
-
+- 사용자 추가 메서드
+```json
+{
+    "key.related_entities": [
+        {
+            "key.name": "UIView",
+            "key.roles": ["role.reference"]
+        }
+    ]
+}
+``` 
+### ⇒ ProtocolDeclSyntax가 없고, key.roles에 role.implementation이 있으면 난독화 제외 대상 
