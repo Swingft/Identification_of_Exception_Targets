@@ -88,19 +88,58 @@ extension UIViewController {
 → original을 호출하면 swizzled가 실행되고, swizzled를 호출하면 original이 실행됨
 ```
 
-## 2. `override`
+## 2. `Subscript`
+인스턴스를 배열처럼 사용할 수 있게 해주는 특수 메서드  
+→ `@objc` 태그 없이 사용되는 경우에는 난독화가 가능하지만, `@objc` 태그와 함께 사용되면 난독화가 불가능함
+
+### 일반 `subscript`
+```swift
+struct MyList {
+    private var items = ["apple", "banana", "cherry"]
+
+    subscript(index: Int) -> String {
+        get { items[index] }
+        set { items[index] = newValue }
+    }
+}
+
+let list = MyList()
+print(list[1])        
+```
+→ 외부에서 직접 호출하지 않고 컴파일러가 내부적으로 호출하기 때문에 난독화 가능
+
+### `@objc subscript`
+```swift
+import Foundation
+
+@objc class ObjcList: NSObject {
+    private var items = ["apple", "banana", "cherry"]
+
+    @objc subscript(index: Int) -> String {
+        get { items[index] }
+        set { items[index] = newValue }
+    }
+}
+
+let list = ObjcList()
+let selector = NSSelectorFromString("objectAtIndexedSubscript:")
+//let selector = #selector(NSObject.objectAtIndexedSubscript(_:))
+```
+→ Selector 이름이 규칙에 따라 "objectAt_Subscript:" 또는 "setObject:at_Subscript:"로 자동 매핑되기 때문에, 난독화하면 selector가 가리키는 메서드를 찾지 못함
+
+## 3. `override`
 부모 클래스의 메서드를 자식 클래스에서 재정의하는 경우  
 → 부모와 자식 간의 연결을 유지해야 하기 때문에, 난독화를 한다면 부모와 자식을 같은 이름으로 난독화해야 함  
 ⇒ SwiftSyntax에서 `DeclModifierSyntax.name.text == override` 조건으로 override 여부 확인 가능
 
-## 3. `overloading`
+## 4. `overloading`
 동일한 이름에 매개변수 타입이나 개수가 다른 메서드를 정의하는 경우  
 → 모두 다 같은 이름으로 난독화해야 함  
 → 다른 이름으로 변경하면 호출부에서도 매개변수에 맞춰서 각각 변경해야 하기 때문에 변경이 복잡해짐  
 ⇒ `FunctionDeclSyntax` 노드에서 함수 이름은 같고 파라미터 리스트가 다르면 오버로드 함수로 판단  
 (`@objc`는 오버로드를 지원하지 않기 때문에 오버로딩된 메서드에 `@objc`를 붙이는 경우, 컴파일 에러가 발생할 수 있음)
 
-## 4. `@IBAction`
+## 5. `@IBAction`
 스토리보드에서 발생한 터치 등의 사용자 이벤트를 매서드와 연결
 ```swift
 @IBAction func buttonTapped(_ sender: UIButton) {     // 난독화 X
@@ -110,7 +149,7 @@ extension UIViewController {
 ```
 ⇒ .storyboard, .xib 파일에 저장된 이름을 같이 수정하면 문제 없음(난독화 가능)
 
-## 5. 시스템 호출
+## 6. 시스템 호출
 시스템이 자동으로 호출하는 메서드이기 때문에 시그니처나 이름이 변경되면 호출되지 않음
 
 ### `AppDelegate` 
@@ -142,7 +181,7 @@ extension UIViewController {
 - `init()`
 - `deinit()`
 
-## 6. Protocol
+## 7. Protocol
 프로토콜이 요구하는 정확한 시그니처와 이름을 지켜야 메서드 호출이 가능함  
 → 프로토콜의 required 메서드 이름을 난독화하면 프로토콜 준수가 깨지면서 에러 발생  
 → struct/class에서 채택한 표준 프로토콜과 required 메서드를 추출해 난독화에서 제외
