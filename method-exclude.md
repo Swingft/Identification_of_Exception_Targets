@@ -191,36 +191,3 @@ let selector = NSSelectorFromString("objectAtIndexedSubscript:")
 → SwiftSyntax는 사용자가 작성한 파일만 분석하기 때문에, 표준 라이브러리나 SDK 내부 프로토콜은 정의부가 AST에 포함되지 않고, `ProtocolDeclSyntax`로 보이지 않음 (표준 프로토콜과 외부 라이브러리 구분이 안 됨 but 둘 다 제외 대상이기 때문에 구분할 필요 없음)
 
 ### required 메서드
-→ SourceKit-LSP로 분석해 `key.related_entities`에 `role.implementation`가 있는지 확인
-- required 메서드
-```json
-{
-    "key.related_entities": [
-        {
-            "key.name": "UITableViewDelegate",
-            "key.roles": [
-                "role.implementation",
-                "role.reference"
-            ],
-            "key.kind": "source.lang.swift.ref.protocol",
-            "key.usr": "s:UIKit22UITableViewDelegateP"
-        }
-    ] 
-}
-{
-    "_comment": "role.implementation : 특정 프로토콜의 요구사항 구현부",
-    "_comment": "key.kind : 심볼의 종류로, swift.ref.protocol인 경우 Swift 프로토콜을 참조하는 코드 요소임"
-}
-```
-- 사용자 추가 메서드
-```json
-{
-    "key.related_entities": [
-        {
-            "key.name": "UIView",
-            "key.roles": ["role.reference"]
-        }
-    ]
-}
-``` 
-⇒ ProtocolDeclSyntax가 없고, key.roles에 role.implementation이 있으면 난독화 제외 대상 
