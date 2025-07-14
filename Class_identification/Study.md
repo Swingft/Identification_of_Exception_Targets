@@ -383,3 +383,100 @@ if let cls = NSClassFromString(className) as? Patch.Type {
 | 4. SwiftUI View 구조체 (struct ContentView: View) | 일반적인 SwiftUI 뷰 구조체 | View 이름이 외부에서 참조되지 않으면 안전 단, Preview나 자동 테스트에서 이름 기반 매칭할 경우 주의 필요 |
 | 5. ObservableObject + @Published로 KVO 흉내내는 구조체 | Swift에서는 NSObject 기반 KVO 대신 Combine 사용 | 외부 런타임 접근 없으면 안전 단, @objc와 같이 사용되면 주의 |
 | 6. @objc struct (비정상적 사용) | Swift 구조체에 @objc는 거의 쓰지 않음. 컴파일 오류 가능 | 보통 불필요 / 구조체에는 잘 안 씀 |
+
+![image.png](attachment:53eafbd4-3974-426b-a1c0-5c34424e5dbe:image.png)
+
+SPrincipalClass, UIMainStoryboardFile, UISceneDelegateClassName 등등 Info.plist에 적혀있는 시스템 클래스 키
+
+예시)
+
+| **Key 이름** | **용도** | **설명 / 동작 시점** |
+| --- | --- | --- |
+| **NSPrincipalClass** | 앱 진입점 | 앱의 시작 클래스 (@UIApplicationMain이 붙은 클래스) → OS가 이 클래스 이름으로 런타임에서 NSClassFromString 후 alloc/init |
+| **UIApplicationSceneManifest > UISceneDelegateClassName** | SceneDelegate 클래스 지정 | iOS 13+부터 멀티 윈도우를 위한 SceneDelegate 클래스 |
+| **UIApplicationSceneManifest > UIApplicationSupportsMultipleScenes** | Scene 시스템 활성화 | (부가 설정 – 클래스명은 아님) |
+| **NSExtension > NSExtensionPrincipalClass** | Extension 진입점 | 오늘 위젯, 공유 확장, Siri 등 Extension의 시작 클래스 → OS가 이 클래스 이름으로 시작 |
+| **NSApplicationClass** (macOS) | macOS 앱 진입점 | macOS 앱에서 기본 Application 클래스 지정 (보통 NSApplication) |
+| **NSServices > NSMessage > NSClass** | macOS 서비스 클래스 | 서비스 호출 처리 클래스 지정 (macOS) |
+| **NSAttributedStringDocumentType** 등 일부 문서 형식 클래스 지정 | 문서 기반 앱 | UIDocument 서브클래스를 명시하는 경우 있음 (iOS/macOS) |
+| **XPCService > NSPrincipalClass** | XPC 서비스의 진입점 클래스 | macOS/iOS의 XPC 서비스 번들 내부에서 지정 |
+| **NIB/XIB/Storyboard 내부의 class=”” 속성 (간접)** | ViewController, View 등 클래스 | 런타임이 XML 속성 값을 기반으로 NSClassFromString 호출해 객체 생성 |
+
+| **① NSPrincipalClass** | 주 앱 Info.plist | ✅ |
+| --- | --- | --- |
+| **② UISceneDelegateClassName**(UIApplicationSceneManifest › UISceneDelegateClassName) | 주 앱 Info.plist | ✅ |
+| **③ NSExtensionPrincipalClass** | 각 Extension 번들 Info.plist | ✅ |
+| **④ UIApplicationShortcutItems › UIApplicationShortcutItemTargetContentIdentifier** | 주 앱 Info.plist | ✅ |
+- 각 번들별 plist파일도 체크하기
+
+| **② 외부 SDK 하드코딩** | ⑥ | 3rd-party SDK 바이너리 내부 NSClassFromString("YourClass") | SDK-전용 Delegate·Handler | 문자열이 .a/.framework 안 상수 → grep 불가 | SDK 문서·strings 스캔 후 화이트리스트 |
+| --- | --- | --- | --- | --- | --- |
+
+| kind | class |
+| --- | --- |
+| attributes | sdk_hardcoded |
+| modifiers | - |
+| protocolContext | FirebaseMessagingDelegate, KakaoLoginHandlerProtocol…
++a |
+| declContext | sdk_binary |
+| ui_related | - |
+
+이거는 외부 sdk 직접 조사(공식문서 읽어서 바뀌면 안되는 클래스 이름 조사)해서 화이트리스트를 작성해야 할듯
+
+JS_Bridge
+
+| kind | class |
+| --- | --- |
+| attributes | js_bridge |
+| modifiers | - |
+| protocolContext | WKScriptMessageHandler
+ |
+| declContext | webkit_bridge |
+| ui_related | web |
+
+외부 플러그인 가져다 쓰는 경우
+
+“번들( .bundle / .plug-in / .framework ) **Info.plist → NSPrincipalClass** 로 로드되는 **플러그인 엔트리 클래스**” 라는 카테고리 태그
+
+| kind | class |
+| --- | --- |
+| attributes | bundle_plugin |
+| modifiers | - |
+| protocolContext | NSObject |
+| declContext | plugin_bundle |
+| ui_related | - |
+
+---
+
+여기까지가 무조건 제외해야 할 대상 + UI쪽은 무조건 제외, **Handoff activityType** 에 **클래스명 하드코딩** 된 경우도 제외
+
+HandOff 부분은
+
+NSUserActivity.activityType 을 클래스명으로 하드코딩한 경우를 말하는 것으로 저런 문자열이 들어가있으면 제외 시키면 됨.
+
+---
+
+| **구분** | **대표 키워드 / 특징** | **‘외부 호출될 수 있는’ 전형적 경로** | **점검 실마리(내가 확인할 수 있는 것)** | **보수적 권장** | **LLM 에게 맡길 수 있는 판단 포인트** |
+| --- | --- | --- | --- | --- | --- |
+| **A. @objc 클래스/메서드** | @objc, @objcMembers | *SDK·UIKit·플러그인* 이 objc_getClass, objc_msgSend 로 호출 | • 소스/AST에 @objc 어노테이션 위치• 외부 SDK 문서에 “이름 고정” 여부 | 이름 고정 또는 @objc("…") 별칭 고정 | “해당 클래스가 어떤 프로토콜·SDK delegate 를 채택하는가?” |
+| **B. Selector API 직접 사용** | #selector(…), perform(Selector(…)), responds(to:) | Obj-C 런타임이 문자열 Selector 로 호출 | • grep/AST로 Selector 인수 문자열 확인 | Selector 이름 보존 | “Selector 가 동적 조합·Reflect 사용인지?” |
+| **C. Interface Builder 연결** | @IBAction, @IBOutlet, XML selector="…", class="…" | Storyboard/XIB 가 런타임 XML 문자열로 매핑 | • 스토리보드/XIB grep (class=", selector=") | 클래스·메서드명 고정 | “XIB 내에서만 쓰이는가, 코드에서도 쓰이는가?” |
+| **D. KVC/KVO / dynamic** | value(forKey:), setValue(_:forKey:), @objc dynamic | 런타임이 프로퍼티명을 문자열로 찾음 | • grep for "forKey:", Mirror( | 프로퍼티명 고정 or @objc("…") | “Key 문자열이 리터럴? 외부서버·JSON 값?” |
+| **E. NSClassFromString in app** | NSClassFromString("SomeClass") | 앱 내부 플러그인·전략 패턴 로드 | • 정적 문자열 vs 변수 조합• 해당 클래스 프로토콜 확인 | 클래스명 고정 | “문자열이 하드코딩·UserDefaults·서버 전달?” |
+| **F. WebKit JS 브리지 (앱이 직접 등록)** | userContentController.add(_: name:"channel") | JS → Swift 채널명 문자열 | • 채널명 문자열 찾기• JS 번들·HTML에 일치 채널 존재? | 채널명 고정, Handler 이름 @objc 고정 | “채널명이 서버 HTML에서 주입될 가능성?” |
+| **G. Runtime Swizzling / Method Exchange** | class_replaceMethod, method_exchangeImplementations | 다른 모듈이 Selector 문자열로 교환 | • swizzle 코드 위치·대상 확인 | 대상 Selector 고정 | “swizzle 대상이 UIKit? 자체 클래스?” |
+| **H. 3rd-SDK Delegate 프로토콜 (문서만 존재)** | *ex.* SomeSDKLoginDelegate | SDK 내부가 Selector 문자열 호출 | • 문서/헤더에서 optional func onLogin() 등 확인 | 고정 | “SDK가 @objc optional method를 요구?” |
+
+| **kind** | **attributes**  | **modifiers** | **protocolContext** | **declContext** | **ui_related** | **LLM 판단 포인트**  |
+| --- | --- | --- | --- | --- | --- | --- |
+| class | @objc
+ | ― | — | source_code | — | “@objc 붙었지만 Selector API·SDK 문서 참조가 있는가?” |
+| class | **selector_dynamic** | ― | — | source_code | - | “#selector / performSelector에 하드 코딩된 문자열이 들어가는가? 아니면 변수로 들어가는가? |
+| class | @IBOutlet, @IBAction
+ | ― | UIViewController / UIView | storyboard_xml | ui | ui라 그냥 다 빼면 될듯 |
+| class | **kvc_dynamic** | dynamic | — | source_code | — | “value(forKey:) · KVO 동적 접근이 외부 문자열(서버 JSON 등)인가?” |
+| class | **nsclass_app** | ― | SomeProtocol | source_code | — | “앱 내부 NSClassFromString("X") → X 가 하드코딩? 서버 주입? |
+| class | **js_bridge_local** | ― | WKScriptMessageHandler | webkit_local | web | “userContentController.add(_:name:) 채널명이 **내부 상수**? CDN/HTML 외부 자원?” |
+| class | **swizzle_target** | ― | NSObject | source_code | — | “method_exchangeImplementations 대상 Selector 이름이 고정돼야 하나?” |
+
+위 표에 있는 부분은 저런 내용이 있으면 난독화시 충돌 가능성이 있지만, 반드시 그런 것은 아니라서 llm의 도움이 필요한 부분
